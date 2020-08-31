@@ -1,0 +1,10 @@
+1. Frame queue
+https://github.com/IntelRealSense/librealsense/blob/master/wrappers/python/examples/frame_queue_example.py
+
+2. Depth Filters
+https://github.com/IntelRealSense/librealsense/blob/jupyter/notebooks/depth_filters.ipynb
+
+3. Archer boxes - > Anchorless Object Detection
+https://medium.com/@andersasac/the-end-of-anchors-improving-object-detection-models-and-annotations-73828c7b39f6
+
+4. Improve depth and add object angle calculation
