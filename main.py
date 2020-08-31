@@ -2,14 +2,24 @@
 import pyrealsense2 as rs
 import cv2
 import numpy as np
+import jetson.utils
+import jetson.inference
 
 #Configure object detection net
+net = jetson.inference.detectNet(argv=['--model=ssd-mobilenet.onnx',
+					'--labels=labels.txt',
+					'--input-blob=input_0',
+					'--output-cvg=scores',
+					'--output-bbox=boxes',
+					'--alpha=0',
+					'--threshold=0.5'])
 
 #Configure depth and collor streams
 pipeline = rs.pipeline()
 config = rs.config()
-config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+config.enable_stream(rs.stream.color, 640, 480, rs.format.rgb8, 30)
 config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+colorizer = rs.colorizer()
 
 #Start streaming
 profile = pipeline.start(config)
@@ -17,10 +27,6 @@ profile = pipeline.start(config)
 #Gettting the depth sensor's depth scale
 depth_sensor = profile.get_device().first_depth_sensor()
 depth_scale = depth_sensor.get_depth_scale()
-
-#We will clip object more than clipping_distance_in_meters meters away
-#clipping_distance_in_meters = 1
-#clipping_distance = clipping_distance_in_meters / depth_scale
 
 #Create a aligh object
 align =  rs.align(rs.stream.color)
@@ -37,21 +43,39 @@ try:
 		color_image = np.asanyarray(aligned_color_frame.get_data())
 		depth_image = np.asanyarray(aligned_depth_frame.get_data())
 
-		#grey_color = 150
-		#depth_image_3d = np.dstack((depth_image, depth_image, depth_image))
-		#bg_removed = np.where((depth_image_3d > clipping_distance) | (depth_image_3d <= 0), grey_color, color_image)
-
-		#depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
-		#images = np.hstack((bg_removed, depth_colormap))
-
-		colorizer =  rs.colorizer()
+		rgb_img = jetson.utils.cudaFromNumpy(color_image)
+		detections = net.Detect(rgb_img, overlay='none')
+		bgr_img = jetson.utils.cudaAllocMapped(width=rgb_img.width,
+							height=rgb_img.height,
+							format='bgr8')
+		jetson.utils.cudaConvertColor(rgb_img, bgr_img)
+		jetson.utils.cudaDeviceSynchronize()
+		cv_color_img = jetson.utils.cudaToNumpy(bgr_img)
 		depth_colormap = np.asanyarray(colorizer.colorize(aligned_depth_frame).get_data())
-		images = np.hstack((color_image, depth_colormap))
+
+		for det in detections:
+			#mean depth value into the box
+			depth = depth_image[int(det.Left):int(det.Right), int(det.Top):int(det.Bottom)]
+			depth = depth *  depth_scale
+			dist, _, _, _ = cv2.mean(depth)
+
+			#draw info about detection
+			cv2.rectangle(cv_color_img, (int(det.Left), int(det.Top)),
+							(int(det.Right), int(det.Bottom)),
+							(255, 255, 255), 2)
+			cv2.putText(cv_color_img, "{1:.3} meters away".format(det.ClassID, dist),
+							(int(det.Left), int(det.Top) - 5),
+							cv2.FONT_HERSHEY_COMPLEX, 0.8, (255, 255, 255))
+			cv2.rectangle(depth_colormap, (int(det.Left), int(det.Top)),
+							(int(det.Right), int(det.Bottom)),
+							(255, 255, 255), 2)
+
+		images = np.hstack((cv_color_img, depth_colormap))
 
 		cv2.imshow('Aligh examples', images)
 		key = cv2.waitKey(1)
 		if key & 0xFF == ord('q'):
-			cv2.destroyAllWindows()
+			#cv2.destroyAllWindows()
 			break
 finally:
 	pipeline.stop()
