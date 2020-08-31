@@ -34,15 +34,18 @@ align =  rs.align(rs.stream.color)
 #Streaming loop
 try:
 	while True:
+		#Align color and depth frame
 		frames = pipeline.wait_for_frames()
 		aligned_frames = align.process(frames)
 		aligned_color_frame = aligned_frames.get_color_frame()
 		aligned_depth_frame = aligned_frames.get_depth_frame()
 		if not aligned_color_frame or not aligned_depth_frame:
 			continue
+		#Convert to numpy format
 		color_image = np.asanyarray(aligned_color_frame.get_data())
 		depth_image = np.asanyarray(aligned_depth_frame.get_data())
 
+		#Detect with numpy->CUDA->numpy convertion
 		rgb_img = jetson.utils.cudaFromNumpy(color_image)
 		detections = net.Detect(rgb_img, overlay='none')
 		bgr_img = jetson.utils.cudaAllocMapped(width=rgb_img.width,
@@ -51,6 +54,8 @@ try:
 		jetson.utils.cudaConvertColor(rgb_img, bgr_img)
 		jetson.utils.cudaDeviceSynchronize()
 		cv_color_img = jetson.utils.cudaToNumpy(bgr_img)
+
+		#Produsing depth colormap with rslib func
 		depth_colormap = np.asanyarray(colorizer.colorize(aligned_depth_frame).get_data())
 
 		for det in detections:
@@ -69,13 +74,14 @@ try:
 			cv2.rectangle(depth_colormap, (int(det.Left), int(det.Top)),
 							(int(det.Right), int(det.Bottom)),
 							(255, 255, 255), 2)
-
+		#Output wwindow formation
 		images = np.hstack((cv_color_img, depth_colormap))
 
+		#Interrupt
 		cv2.imshow('Aligh examples', images)
 		key = cv2.waitKey(1)
 		if key & 0xFF == ord('q'):
-			#cv2.destroyAllWindows()
+			cv2.destroyAllWindows()
 			break
 finally:
 	pipeline.stop()
